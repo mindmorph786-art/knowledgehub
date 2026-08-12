@@ -1,0 +1,352 @@
+<?php
+/* ==========================================================================
+   Knowledge Hub - Complete Library Management System (Single File Solution)
+   ========================================================================== */
+
+// 1. DATABASE CONFIGURATION
+$db_host = 'localhost';
+$db_user = 'root';      // آپ کے MySQL کا یوزر نیم
+$db_pass = '';          // آپ کے MySQL کا پاس ورڈ
+$db_name = 'knowledge_hub';
+
+// Connect to MySQL
+$conn = new mysqli($db_host, $db_user, $db_pass);
+
+if ($conn->connect_error) {
+    die("Database Connection Failed: " . $conn->connect_error);
+}
+
+// Create Database if not exists
+$conn->query("CREATE DATABASE IF NOT EXISTS `$db_name`");
+$conn->select_db($db_name);
+
+// Auto-Create Tables
+$conn->query("CREATE TABLE IF NOT EXISTS `books` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `title` VARCHAR(255) NOT NULL,
+    `author` VARCHAR(255) NOT NULL,
+    `category` VARCHAR(100) NOT NULL,
+    `pdf_path` VARCHAR(255) DEFAULT NULL
+)");
+
+$conn->query("CREATE TABLE IF NOT EXISTS `issued_books` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `student_name` VARCHAR(255) NOT NULL,
+    `student_id` VARCHAR(50) NOT NULL,
+    `book_title` VARCHAR(255) NOT NULL,
+    `issue_date` DATE NOT NULL,
+    `return_date` DATE NOT NULL,
+    `status` ENUM('Issued', 'Returned') DEFAULT 'Issued'
+)");
+
+// Insert Sample Data if Tables are Empty
+$check_books = $conn->query("SELECT COUNT(*) as count FROM books");
+if ($check_books->fetch_assoc()['count'] == 0) {
+    $conn->query("INSERT INTO books (title, author, category, pdf_path) VALUES 
+        ('The Great Gatsby', 'F. Scott Fitzgerald', 'Classic Literature', 'uploads/books/gatsby.pdf'),
+        ('To Kill a Mockingbird', 'Harper Lee', 'Fiction', 'uploads/books/mockingbird.pdf'),
+        ('1984', 'George Orwell', 'Dystopian', 'uploads/books/1984.pdf'),
+        ('A Brief History of Time', 'Stephen Hawking', 'Science', 'uploads/books/history.pdf')
+    ");
+}
+
+$check_issued = $conn->query("SELECT COUNT(*) as count FROM issued_books");
+if ($check_issued->fetch_assoc()['count'] == 0) {
+    $today = date('Y-m-d');
+    $next_week = date('Y-m-d', strtotime('+7 days'));
+    $conn->query("INSERT INTO issued_books (student_name, student_id, book_title, issue_date, return_date, status) VALUES 
+        ('Ali Raza', 'ST-1001', '1984', '$today', '$next_week', 'Issued'),
+        ('Usman Khan', 'ST-1002', 'The Great Gatsby', '$today', '$next_week', 'Issued'),
+        ('Ayesha Ahmed', 'ST-1003', 'To Kill a Mockingbird', '2026-07-20', '2026-07-27', 'Returned')
+    ");
+}
+
+// 2. FORM ACTIONS (Handling Issue Book & Return Book)
+$message = "";
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['action']) && $_POST['action'] === 'issue_book') {
+        $s_name = $conn->real_escape_string($_POST['student_name']);
+        $s_id = $conn->real_escape_string($_POST['student_id']);
+        $b_title = $conn->real_escape_string($_POST['book_title']);
+        $i_date = $_POST['issue_date'];
+        $r_date = $_POST['return_date'];
+
+        $sql = "INSERT INTO issued_books (student_name, student_id, book_title, issue_date, return_date, status) 
+                VALUES ('$s_name', '$s_id', '$b_title', '$i_date', '$r_date', 'Issued')";
+        if ($conn->query($sql)) {
+            $message = "<div class='alert alert-success'>کتاب کامیابی سے جاری کر دی گئی ہے!</div>";
+        }
+    }
+
+    if (isset($_POST['action']) && $_POST['action'] === 'return_book') {
+        $issue_id = intval($_POST['issue_id']);
+        $conn->query("UPDATE issued_books SET status='Returned' WHERE id=$issue_id");
+        $message = "<div class='alert alert-success'>کتاب کی واپسی کا اندراج کر لیا گیا ہے!</div>";
+    }
+}
+
+// Search Handling
+$search_query = isset($_GET['query']) ? $conn->real_escape_string($_GET['query']) : '';
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Hub - Automated Library Management</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #f4f6f9; color: #333; display: flex; flex-direction: column; min-height: 100vh; }
+
+        /* Header & Nav */
+        header { background-color: #1a365d; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .logo { font-size: 1.5rem; font-weight: bold; color: #fff; text-decoration: none; }
+        nav ul { display: flex; list-style: none; gap: 1.5rem; }
+        nav a { color: #e2e8f0; text-decoration: none; font-weight: 500; }
+
+        /* Hero & Search */
+        .hero { background: linear-gradient(rgba(26, 54, 93, 0.85), rgba(26, 54, 93, 0.85)), url('https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=1200&q=80') center/cover; color: white; padding: 3rem 1rem; text-align: center; }
+        .search-form { display: flex; max-width: 600px; margin: 1rem auto 0 auto; gap: 0.5rem; }
+        .search-input { flex: 1; padding: 0.8rem; border: none; border-radius: 4px; font-size: 1rem; }
+        .search-button { padding: 0.8rem 1.5rem; background-color: #3182ce; color: white; border: none; border-radius: 4px; cursor: pointer; }
+
+        /* Dashboard Container */
+        .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; flex: 1; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .stat-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: center; border-top: 4px solid #3182ce; }
+        .stat-number { font-size: 2rem; font-weight: bold; color: #2b6cb0; }
+
+        /* Forms & Tables Layout */
+        .layout-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 2rem; }
+        @media (max-width: 900px) { .layout-grid { grid-template-columns: 1fr; } }
+
+        .card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 2rem; }
+        .card h3 { margin-bottom: 1rem; color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem; }
+
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; margin-bottom: 0.3rem; font-size: 0.9rem; font-weight: 600; }
+        .form-group input, .form-group select { width: 100%; padding: 0.6rem; border: 1px solid #cbd5e0; border-radius: 4px; }
+        .btn-submit { width: 100%; padding: 0.7rem; background-color: #38a169; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: bold; }
+
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 0.9rem; }
+        th { background-color: #edf2f7; color: #4a5568; }
+        
+        .badge { padding: 0.2rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: bold; }
+        .badge-issued { background-color: #feebc8; color: #744210; }
+        .badge-returned { background-color: #c6f6d5; color: #22543d; }
+
+        .btn-sm { padding: 0.3rem 0.6rem; font-size: 0.8rem; border-radius: 4px; text-decoration: none; border: none; cursor: pointer; }
+        .btn-return { background-color: #e53e3e; color: white; }
+        .btn-pdf { background-color: #3182ce; color: white; }
+
+        .alert { padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
+        .alert-success { background-color: #c6f6d5; color: #22543d; }
+
+        footer { background-color: #1a202c; color: #a0aec0; padding: 1.5rem; text-align: center; margin-top: auto; }
+    </style>
+</head>
+<body>
+
+    <!-- NAVBAR -->
+    <header>
+        <a href="index.php" class="logo">📖 Knowledge Hub Automation System</a>
+        <nav>
+            <ul>
+                <li><a href="index.php">Dashboard</a></li>
+                <li><a href="#issued-section">Issued Books</a></li>
+                <li><a href="#catalog-section">Book Catalog</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <!-- HERO SEARCH BAR -->
+    <section class="hero">
+        <h1>Knowledge Hub Management System</h1>
+        <p>Track books, student issuing records, and library catalog seamlessly.</p>
+        <form action="index.php" method="GET" class="search-form">
+            <input type="text" name="query" class="search-input" placeholder="Search by student name, roll no, or book title..." value="<?php echo htmlspecialchars($search_query); ?>">
+            <button type="submit" class="search-button">Search System</button>
+        </form>
+    </section>
+
+    <!-- MAIN DASHBOARD -->
+    <div class="container">
+        
+        <?php echo $message; ?>
+
+        <!-- STATISTICS -->
+        <div class="stats-grid">
+            <?php
+            $total_b = $conn->query("SELECT COUNT(*) as count FROM books")->fetch_assoc()['count'];
+            $issued_b = $conn->query("SELECT COUNT(*) as count FROM issued_books WHERE status='Issued'")->fetch_assoc()['count'];
+            $returned_b = $conn->query("SELECT COUNT(*) as count FROM issued_books WHERE status='Returned'")->fetch_assoc()['count'];
+            ?>
+            <div class="stat-card">
+                <h3>Total Books Cataloged</h3>
+                <div class="stat-number"><?php echo $total_b; ?></div>
+            </div>
+            <div class="stat-card">
+                <h3>Currently Issued Books</h3>
+                <div class="stat-number" style="color: #dd6b20;"><?php echo $issued_b; ?></div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Books Returned</h3>
+                <div class="stat-number" style="color: #38a169;"><?php echo $returned_b; ?></div>
+            </div>
+        </div>
+
+        <div class="layout-grid">
+            
+            <!-- ISSUE BOOK FORM -->
+            <div>
+                <div class="card">
+                    <h3>➕ Issue Book to Student</h3>
+                    <form action="index.php" method="POST">
+                        <input type="hidden" name="action" value="issue_book">
+                        
+                        <div class="form-group">
+                            <label>Student Name (طالب علم کا نام):</label>
+                            <input type="text" name="student_name" required placeholder="e.g. Ali Raza">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Student ID / Roll No:</label>
+                            <input type="text" name="student_id" required placeholder="e.g. ST-1005">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Select Book (کتاب کا نام):</label>
+                            <select name="book_title" required>
+                                <?php
+                                $b_res = $conn->query("SELECT title FROM books");
+                                while($b = $b_res->fetch_assoc()) {
+                                    echo "<option value='".htmlspecialchars($b['title'])."'>".htmlspecialchars($b['title'])."</option>";
+                                }
+                                ?>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Issue Date (تاریخ اجراء):</label>
+                            <input type="date" name="issue_date" value="<?php echo date('Y-m-d'); ?>" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Return Date (تاریخ واپسی):</label>
+                            <input type="date" name="return_date" value="<?php echo date('Y-m-d', strtotime('+7 days')); ?>" required>
+                        </div>
+
+                        <button type="submit" class="btn-submit">Issue Book Now</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- ISSUED BOOKS RECORD & CATALOG -->
+            <div>
+                <!-- ISSUED RECORDS TABLE -->
+                <div class="card" id="issued-section">
+                    <h3>📋 Student Book Issuing Records</h3>
+                    <div style="overflow-x: auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Student Name</th>
+                                    <th>Roll No</th>
+                                    <th>Book Title</th>
+                                    <th>Issue / Return</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php
+                                $where_clause = "";
+                                if(!empty($search_query)) {
+                                    $where_clause = "WHERE student_name LIKE '%$search_query%' OR student_id LIKE '%$search_query%' OR book_title LIKE '%$search_query%'";
+                                }
+                                $issued_sql = "SELECT * FROM issued_books $where_clause ORDER BY id DESC";
+                                $res = $conn->query($issued_sql);
+
+                                if ($res->num_rows > 0) {
+                                    while($row = $res->fetch_assoc()) {
+                                        $badge_class = $row['status'] == 'Issued' ? 'badge-issued' : 'badge-returned';
+                                        echo "<tr>";
+                                        echo "<td><strong>".htmlspecialchars($row['student_name'])."</strong></td>";
+                                        echo "<td>".htmlspecialchars($row['student_id'])."</td>";
+                                        echo "<td>".htmlspecialchars($row['book_title'])."</td>";
+                                        echo "<td><small><b>Out:</b> ".$row['issue_date']."<br><b>In:</b> ".$row['return_date']."</small></td>";
+                                        echo "<td><span class='badge $badge_class'>".$row['status']."</span></td>";
+                                        echo "<td>";
+                                        if($row['status'] == 'Issued') {
+                                            echo "<form method='POST' action='index.php' style='display:inline;'>
+                                                    <input type='hidden' name='action' value='return_book'>
+                                                    <input type='hidden' name='issue_id' value='".$row['id']."'>
+                                                    <button type='submit' class='btn-sm btn-return'>Mark Return</button>
+                                                  </form>";
+                                        } else {
+                                            echo "<small style='color:gray;'>Completed</small>";
+                                        }
+                                        echo "</td>";
+                                        echo "</tr>";
+                                    }
+                                } else {
+                                    echo "<tr><td colspan='6' style='text-align:center;'>No issuing records found.</td></tr>";
+                                }
+                                ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- BOOK CATALOG TABLE -->
+                <div class="card" id="catalog-section">
+                    <h3>📚 Book Catalog & Digital Downloads</h3>
+                    <div style="overflow-x: auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Book Title</th>
+                                    <th>Author</th>
+                                    <th>Category</th>
+                                    <th>PDF</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php
+                                $books_res = $conn->query("SELECT * FROM books ORDER BY id DESC");
+                                while($bk = $books_res->fetch_assoc()) {
+                                    echo "<tr>";
+                                    echo "<td><strong>".htmlspecialchars($bk['title'])."</strong></td>";
+                                    echo "<td>".htmlspecialchars($bk['author'])."</td>";
+                                    echo "<td>".htmlspecialchars($bk['category'])."</td>";
+                                    echo "<td>";
+                                    if(!empty($bk['pdf_path'])) {
+                                        echo "<a href='".htmlspecialchars($bk['pdf_path'])."' class='btn-sm btn-pdf' download target='_blank'>PDF</a>";
+                                    } else {
+                                        echo "<small>N/A</small>";
+                                    }
+                                    echo "</td>";
+                                    echo "</tr>";
+                                }
+                                ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- FOOTER -->
+    <footer>
+        <p>&copy; <?php echo date('Y'); ?> Knowledge Hub Library Management System. All rights reserved.</p>
+    </footer>
+
+</body>
+</html>
